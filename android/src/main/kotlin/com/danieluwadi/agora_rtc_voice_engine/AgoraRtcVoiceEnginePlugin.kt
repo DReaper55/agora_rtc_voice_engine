@@ -32,33 +32,33 @@ class AgoraRtcVoiceEnginePlugin: FlutterPlugin, MethodChannel.MethodCallHandler,
   override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
     when (call.method) {
       "initialize" -> {
-        val appId = call.argument<String>("appId")!!
-        rtcEngine = RtcEngine.create(context, appId, object : IRtcEngineEventHandler() {
-          override fun onUserJoined(uid: Int, elapsed: Int) {
-            eventSink?.success(mapOf("event" to "onUserJoined", "uid" to uid))
-          }
-
-          override fun onUserOffline(uid: Int, reason: Int) {
-            eventSink?.success(mapOf("event" to "onUserOffline", "uid" to uid))
-          }
-
-          override fun onAudioVolumeIndication(speakers: Array<out AudioVolumeInfo>?, totalVolume: Int) {
-            val list = speakers?.map { mapOf("uid" to it.uid, "volume" to it.volume) } ?: emptyList()
-            eventSink?.success(mapOf("event" to "onAudioVolumeIndication", "speakers" to list))
-          }
-        })
-        rtcEngine?.setChannelProfile(Constants.CHANNEL_PROFILE_COMMUNICATION)
+        val appId = call.argument<String>("appId") ?: ""
+        val areaCode = call.argument<String>("areaCode") ?: ""
+        initializeAgora(appId, areaCode)
+        result.success(null)
+      }
+      "release" -> {
+        rtcEngine?.leaveChannel()
+        RtcEngine.destroy()
+        rtcEngine = null
         result.success(null)
       }
       "joinChannel" -> {
         val token = call.argument<String>("token")!!
         val channelName = call.argument<String>("channelName")!!
         val uid = call.argument<Int>("uid") ?: 0
-        rtcEngine?.joinChannel(token, channelName, null, uid)
+        rtcEngine?.joinChannel(token, channelName, "", uid)
         result.success(null)
       }
       "leaveChannel" -> {
         rtcEngine?.leaveChannel()
+        result.success(null)
+      }
+      "enableAudioVolumeIndication" -> {
+        val interval = call.argument<Int>("interval") ?: 200
+        val smooth = call.argument<Int>("smooth") ?: 3
+        val reportVAD = call.argument<Boolean>("reportVad") ?: false
+        rtcEngine?.enableAudioVolumeIndication(interval, smooth, reportVAD)
         result.success(null)
       }
       "getPlatformVersion" -> {
@@ -68,6 +68,35 @@ class AgoraRtcVoiceEnginePlugin: FlutterPlugin, MethodChannel.MethodCallHandler,
     }
   }
 
+  private fun initializeAgora(appId: String, areaCode: String) {
+    val config = RtcEngineConfig()
+    config.mContext = context
+    config.mAppId = appId
+    config.mEventHandler = object : IRtcEngineEventHandler() {
+      override fun onUserJoined(uid: Int, elapsed: Int) {
+        eventSink?.success(mapOf("event" to "onUserJoined", "uid" to uid))
+      }
+
+      override fun onUserOffline(uid: Int, reason: Int) {
+        eventSink?.success(mapOf("event" to "onUserOffline", "uid" to uid))
+      }
+
+      override fun onAudioVolumeIndication(speakers: Array<out AudioVolumeInfo>?, totalVolume: Int) {
+        val speakerList = speakers?.map {
+          mapOf("uid" to it.uid, "volume" to it.volume)
+        }
+        eventSink?.success(mapOf(
+          "event" to "onAudioVolumeIndication",
+          "speakers" to speakerList,
+          "totalVolume" to totalVolume
+        ))
+      }
+    }
+    config.mAreaCode = if (areaCode.isNotEmpty()) areaCode.toInt() else RtcEngineConfig.AREA_CODE_GLOB
+    rtcEngine = RtcEngine.create(config)
+  }
+
+  // EventChannel handlers
   override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
     eventSink = events
   }

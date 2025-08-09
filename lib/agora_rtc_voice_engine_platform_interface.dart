@@ -26,4 +26,22 @@ abstract class AgoraRtcVoiceEnginePlatform extends PlatformInterface {
   Future<String?> getPlatformVersion() {
     throw UnimplementedError('platformVersion() has not been implemented.');
   }
+
+  // ===== Engine lifecycle =====
+  Future<void> initialize({
+    required String appId,
+    String? areaCode,
+  });
+
+  Future<void> release();
+
+  // ===== Method Calls =====
+  Future<void> joinChannel(String token, String channelName, int uid);
+  Future<void> leaveChannel();
+
+  // ===== Event Streams =====
+  Stream<Map<dynamic, dynamic>> get events;
+  Stream<Map<dynamic, dynamic>> get onUserJoined;
+  Stream<Map<dynamic, dynamic>> get onUserOffline;
+  Stream<Map<dynamic, dynamic>> get onAudioVolumeIndication;
 }

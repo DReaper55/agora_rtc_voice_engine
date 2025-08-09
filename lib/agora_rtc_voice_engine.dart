@@ -1,76 +1,79 @@
-import 'agora_rtc_voice_engine_platform_interface.dart';
-
 import 'dart:async';
-import 'package:flutter/services.dart';
+
+import 'agora_rtc_voice_engine_platform_interface.dart';
+import 'agora_rtc_voice_engine_method_channel.dart';
 
 class AgoraRtcVoiceEngine {
-  static const MethodChannel _methodChannel =
-  MethodChannel('com.danieluwadi.agora_rtc_voice_engine/methods');
+  AgoraRtcVoiceEngine._(); // private constructor
+  static final AgoraRtcVoiceEngine instance = AgoraRtcVoiceEngine._();
 
-  static const EventChannel _eventChannel =
-  EventChannel('com.danieluwadi.agora_rtc_voice_engine/events');
+  // Stream controllers for each event type
+  final _userJoinedController = StreamController<Map<dynamic, dynamic>>.broadcast();
+  final _userOfflineController = StreamController<Map<dynamic, dynamic>>.broadcast();
+  final _audioVolumeController = StreamController<Map<dynamic, dynamic>>.broadcast();
 
-  static Stream<dynamic>? _eventStream;
+  StreamSubscription? _eventSub;
 
-  static Stream<dynamic> get events {
-    _eventStream ??= _eventChannel.receiveBroadcastStream();
-    return _eventStream!;
+  static void registerWithPlatform() {
+    AgoraRtcVoiceEnginePlatform.instance = MethodChannelAgoraRtcVoiceEngine();
   }
 
   Future<String?> getPlatformVersion() {
     return AgoraRtcVoiceEnginePlatform.instance.getPlatformVersion();
   }
 
-  // --- Initialization ---
-  static Future<void> initialize(String appId) async {
-    await _methodChannel.invokeMethod('initialize', {'appId': appId});
-  }
+  // ===== Engine lifecycle =====
+  Future<void> initialize({
+    required String appId,
+    String? areaCode,
+  }) async {
+    // Initialize platform
+    await AgoraRtcVoiceEnginePlatform.instance.initialize(
+      appId: appId,
+      areaCode: areaCode,
+    );
 
-  static Future<void> release() async {
-    await _methodChannel.invokeMethod('release');
-  }
+    // Listen to native event channel
+    _eventSub = AgoraRtcVoiceEnginePlatform.instance.events.listen((event) {
+      final eventName = event['event'];
+      final data = event['data'];
 
-  // --- Join / Leave ---
-  static Future<void> joinChannel(String? token, String channelName, int uid) async {
-    await _methodChannel.invokeMethod('joinChannel', {
-      'token': token,
-      'channelName': channelName,
-      'uid': uid,
+      switch (eventName) {
+        case 'onUserJoined':
+          _userJoinedController.add(data);
+          break;
+        case 'onUserOffline':
+          _userOfflineController.add(data);
+          break;
+        case 'onAudioVolumeIndication':
+          _audioVolumeController.add(data);
+          break;
+      }
     });
   }
 
-  static Future<void> leaveChannel() async {
-    await _methodChannel.invokeMethod('leaveChannel');
+  Future<void> release() async {
+    await AgoraRtcVoiceEnginePlatform.instance.release();
+    await _eventSub?.cancel();
+    _eventSub = null;
+
+    _userJoinedController.close();
+    _userOfflineController.close();
+    _audioVolumeController.close();
   }
 
-  // --- Audio controls ---
-  static Future<void> muteLocalAudioStream(bool mute) async {
-    await _methodChannel.invokeMethod('muteLocalAudioStream', {'mute': mute});
+  // ===== Method Calls =====
+  Future<void> joinChannel(String token, String channelName, int uid) {
+    return AgoraRtcVoiceEnginePlatform.instance
+        .joinChannel(token, channelName, uid);
   }
 
-  static Future<void> muteRemoteAudioStream(int uid, bool mute) async {
-    await _methodChannel.invokeMethod('muteRemoteAudioStream', {'uid': uid, 'mute': mute});
+  Future<void> leaveChannel() {
+    return AgoraRtcVoiceEnginePlatform.instance.leaveChannel();
   }
 
-  static Future<void> muteAllRemoteAudioStreams(bool mute) async {
-    await _methodChannel.invokeMethod('muteAllRemoteAudioStreams', {'mute': mute});
-  }
-
-  static Future<void> enableLocalAudio(bool enabled) async {
-    await _methodChannel.invokeMethod('enableLocalAudio', {'enabled': enabled});
-  }
-
-  static Future<void> setVolume(int uid, int volume) async {
-    await _methodChannel.invokeMethod('setRemoteUserVolume', {'uid': uid, 'volume': volume});
-  }
-
-  // --- Others ---
-  static Future<void> enableAudioVolumeIndication(int interval, int smooth) async {
-    await _methodChannel.invokeMethod('enableAudioVolumeIndication', {'interval': interval, 'smooth': smooth});
-  }
-
-  // Helper to forward arbitrary method names (useful for parity)
-  static Future<dynamic> invoke(String method, [Map<String, dynamic>? args]) async {
-    return await _methodChannel.invokeMethod(method, args ?? {});
-  }
+  // ===== Event Streams =====
+  Stream<Map<dynamic, dynamic>> get onUserJoined => _userJoinedController.stream;
+  Stream<Map<dynamic, dynamic>> get onUserOffline => _userOfflineController.stream;
+  Stream<Map<dynamic, dynamic>> get onAudioVolumeIndication => _audioVolumeController.stream;
 }
