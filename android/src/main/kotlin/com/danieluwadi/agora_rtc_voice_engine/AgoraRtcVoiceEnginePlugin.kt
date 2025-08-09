@@ -3,82 +3,62 @@ package com.danieluwadi.agora_rtc_voice_engine
 import android.content.Context
 import androidx.annotation.NonNull
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.MethodChannel.MethodCallHandler
-import io.flutter.plugin.common.MethodChannel.Result
+import io.agora.rtc2.*
 
-import io.agora.rtc2.{RtcEngine, IRtcEngineEventHandler}
-
-class AgoraRtcVoiceEnginePlugin: FlutterPlugin, MethodCallHandler {
-  private lateinit var channel : MethodChannel
+class AgoraRtcVoiceEnginePlugin: FlutterPlugin, MethodChannel.MethodCallHandler, EventChannel.StreamHandler {
+  private lateinit var methodChannel: MethodChannel
+  private lateinit var eventChannel: EventChannel
+  private var eventSink: EventChannel.EventSink? = null
   private var rtcEngine: RtcEngine? = null
-  private var applicationContext: Context? = null
+  private lateinit var context: Context
 
-  override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
-    applicationContext = flutterPluginBinding.applicationContext
-    channel = MethodChannel(flutterPluginBinding.binaryMessenger, "agora_rtc_voice_engine")
-    channel.setMethodCallHandler(this)
+  override fun onAttachedToEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
+    context = binding.applicationContext
+    methodChannel = MethodChannel(binding.binaryMessenger, "com.danieluwadi.agora_rtc_voice_engine/methods")
+    methodChannel.setMethodCallHandler(this)
+
+    eventChannel = EventChannel(binding.binaryMessenger, "com.danieluwadi.agora_rtc_voice_engine/events")
+    eventChannel.setStreamHandler(this)
+  }
+
+  override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
+    methodChannel.setMethodCallHandler(null)
+    eventChannel.setStreamHandler(null)
   }
 
   override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
     when (call.method) {
       "initialize" -> {
-        val appId = call.argument<String>("appId") ?: run { result.error("NO_APPID", "appId missing", null); return }
-        if (rtcEngine == null) {
-          rtcEngine = RtcEngine.create(applicationContext, appId, object : IRtcEngineEventHandler() {})
-          // audio-only configuration
-          rtcEngine?.setChannelProfile(io.agora.rtc2.Constants.CHANNEL_PROFILE_COMMUNICATION)
-          rtcEngine?.disableVideo()
-        }
-        result.success(null)
-      }
-      "release" -> {
-        rtcEngine?.let { RtcEngine.destroy() ; rtcEngine = null }
+        val appId = call.argument<String>("appId")!!
+        rtcEngine = RtcEngine.create(context, appId, object : IRtcEngineEventHandler() {
+          override fun onUserJoined(uid: Int, elapsed: Int) {
+            eventSink?.success(mapOf("event" to "onUserJoined", "uid" to uid))
+          }
+
+          override fun onUserOffline(uid: Int, reason: Int) {
+            eventSink?.success(mapOf("event" to "onUserOffline", "uid" to uid))
+          }
+
+          override fun onAudioVolumeIndication(speakers: Array<out AudioVolumeInfo>?, totalVolume: Int) {
+            val list = speakers?.map { mapOf("uid" to it.uid, "volume" to it.volume) } ?: emptyList()
+            eventSink?.success(mapOf("event" to "onAudioVolumeIndication", "speakers" to list))
+          }
+        })
+        rtcEngine?.setChannelProfile(Constants.CHANNEL_PROFILE_COMMUNICATION)
         result.success(null)
       }
       "joinChannel" -> {
-        val token = call.argument<String>("token")
+        val token = call.argument<String>("token")!!
         val channelName = call.argument<String>("channelName")!!
         val uid = call.argument<Int>("uid") ?: 0
-        rtcEngine?.joinChannel(token, channelName, "", uid)
+        rtcEngine?.joinChannel(token, channelName, null, uid)
         result.success(null)
       }
       "leaveChannel" -> {
         rtcEngine?.leaveChannel()
-        result.success(null)
-      }
-      "muteLocalAudioStream" -> {
-        val mute = call.argument<Boolean>("mute") ?: false
-        rtcEngine?.muteLocalAudioStream(mute)
-        result.success(null)
-      }
-      "muteRemoteAudioStream" -> {
-        val uid = call.argument<Int>("uid") ?: 0
-        val mute = call.argument<Boolean>("mute") ?: false
-        rtcEngine?.muteRemoteAudioStream(uid, mute)
-        result.success(null)
-      }
-      "muteAllRemoteAudioStreams" -> {
-        val mute = call.argument<Boolean>("mute") ?: false
-        rtcEngine?.muteAllRemoteAudioStreams(mute)
-        result.success(null)
-      }
-      "enableLocalAudio" -> {
-        val enabled = call.argument<Boolean>("enabled") ?: true
-        rtcEngine?.enableLocalAudio(enabled)
-        result.success(null)
-      }
-      "setRemoteUserVolume" -> {
-        val uid = call.argument<Int>("uid") ?: 0
-        val volume = call.argument<Int>("volume") ?: 100
-        rtcEngine?.adjustUserPlaybackSignalVolume(uid, volume)
-        result.success(null)
-      }
-      "enableAudioVolumeIndication" -> {
-        val interval = call.argument<Int>("interval") ?: 200
-        val smooth = call.argument<Int>("smooth") ?: 3
-        rtcEngine?.enableAudioVolumeIndication(interval, smooth, true)
         result.success(null)
       }
       "getPlatformVersion" -> {
@@ -88,8 +68,11 @@ class AgoraRtcVoiceEnginePlugin: FlutterPlugin, MethodCallHandler {
     }
   }
 
-  override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
-    channel.setMethodCallHandler(null)
-    rtcEngine?.let { RtcEngine.destroy(); rtcEngine = null }
+  override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+    eventSink = events
+  }
+
+  override fun onCancel(arguments: Any?) {
+    eventSink = null
   }
 }
